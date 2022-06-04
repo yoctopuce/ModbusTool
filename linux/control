@@ -1,0 +1,15 @@
+Package: modbustool
+Version: 1.0.49974
+Sections: electronics
+Priority: optional
+Architecture: all
+Maintainer: Yoctopuce <dev@yoctopuce.com>
+Homepage:http://www.yoctopuce.com
+Installed-Size: 4000
+Section: electronics
+Description: Modbus utility.
+ An utility that allowed one to easily work
+ with modbus commands though Yoctopuce device supporting
+ Modbus protocol, such as the Yocto-RS485, Yocto-RS232 and
+ Yocto-Serial
+
