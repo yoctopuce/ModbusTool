@@ -5,7 +5,7 @@
 ## monodevelop  (sudo apt-get install monodevelop)
 
 
-sudo rm -rf modbustool
+rm -rf modbustool
 
 mkdir --mode=755 modbustool/
 mkdir --mode=755 modbustool/usr/
@@ -98,11 +98,6 @@ cp  ../bin/Release/modbustool.exe modbustool/usr/lib/ModbusTool
 chmod 755 modbustool/usr/lib/ModbusTool/modbustool.exe
 #chmod 644 modbustool/usr/lib/ModbusTool/modbustool.exe.config
 
-#set all file to root user
-sudo chown -R root:root modbustool
 
-
-dpkg-deb --build modbustool
-
-
+fakeroot dpkg-deb -Zxz --build modbustool
 lintian modbustool.deb

@@ -45,7 +45,7 @@ namespace ModbusTool
 {
     class constants
     {
-        public static string buildVersion = "51050";
+        public static string buildVersion = "57482";
 
 
     }

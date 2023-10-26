@@ -1,6 +1,6 @@
 /*********************************************************************
  *
- * $Id: yocto_api.cs 49750 2022-05-13 07:10:42Z seb $
+ * $Id: yocto_api.cs 56393 2023-09-05 08:36:51Z seb $
  *
  * High-level programming interface, common to all modules
  *
@@ -267,8 +267,12 @@ internal static class SafeNativeMethods
         Boolean is64 = IntPtr.Size == 8;
         YAPIDLL_PRELOAD_TYPE preloadType = YAPIDLL_PRELOAD_TYPE.NONE;
         Boolean loaded = false;
+        String loadDescription = "";
+        string dll_path ="";
+        List<String> loadlogs = new List<String>();
+        string ErrorCause = "Unable to load YAPI dynamic library.";
 
-        while(!loaded) {
+        while (!loaded) {
             PlatformID platform = Environment.OSVersion.Platform;
             if (platform == PlatformID.MacOSX) {
                 if (is64) {
@@ -301,6 +305,13 @@ internal static class SafeNativeMethods
             do
             {
                 debugDll("Try YAPI load with " + _dllVersion + " and " + preloadType);
+                loadDescription = "(" + _dllVersion + " and " + preloadType + ", ";
+                #if NETCOREAPP3_0_OR_GREATER
+                    loadDescription += ".Net Core)";
+                   
+                #else
+                    loadDescription += ".Net Framework)";          
+                #endif
 
                 if (preloadType != YAPIDLL_PRELOAD_TYPE.NONE) {
                     string dir = "";
@@ -321,7 +332,7 @@ internal static class SafeNativeMethods
                             break;
                     }
 
-                    string dll_path;
+                   
                     switch (_dllVersion) {
                         default:
                         case YAPIDLL_VERSION.WIN32:
@@ -353,30 +364,40 @@ internal static class SafeNativeMethods
                     try {
                         IntPtr loadLibrary;
 #if NETCOREAPP3_0_OR_GREATER
-                        debugDll("preload library using " + dll_path + " (.Net Core)");
+                        debugDll("preload library using " + dll_path + " (.Net Core)\n");
                         loadLibrary = NativeLibrary.Load(dll_path);
 #else
-                    debugDll("preload library using "+dll_path+" (.Net Framework)");
-                    loadLibrary = NativeMethods.LoadLibrary(dll_path);
+                        debugDll("preload library with path \""+dll_path+"\" (.Net Framework)\n");
+                        loadLibrary = NativeMethods.LoadLibrary(dll_path);
 #endif
                         if (loadLibrary == IntPtr.Zero) {
-                            debugDll("Unable to preload dll with :" + dll_path);
+                            debugDll("Unable to preload dll with \"" + dll_path + "\"\n");
+                            ErrorCause = "NULL rersult";
+                            loadlogs.Add("Tried to load \"" + dll_path + "\" " + loadDescription + " -> result was null.");
                         } else {
-                            debugDll("YAPI preloaded from " + dll_path);
+                            debugDll("YAPI preloaded from \"" + dll_path + "\"\n");
                         }
                     } catch (System.EntryPointNotFoundException ex) {
-                        debugDll("Entry point not found:" + ex.Message);
+                        ErrorCause = ex.Message;
+                        debugDll("Entry point not found :" + ErrorCause + "\n");
+                        loadlogs.Add("Tried to load \"" + dll_path + "\" " + loadDescription + " -> Entry point not found. " + ErrorCause);
                     } catch (System.DllNotFoundException ex) {
-                        debugDll("Unable to load dll with :" + ex.Message);
-                    }
+                        ErrorCause = ex.Message;
+                        debugDll("Unable to load dll with : " + ErrorCause + "\n");
+                        loadlogs.Add("Tried to load \"" + dll_path + "\" " + loadDescription + " -> File not found. " + ErrorCause);
+                     }
                 }
 
                 try {
                     return _yapiGetAPIVersion(ref version, ref dat_);
                 } catch (System.DllNotFoundException ex) {
-                    debugDll(ex.ToString());
+                    debugDll(ex.Message + "\n");
+                    ErrorCause = ex.Message;
+                    loadlogs.Add("Tried to load \"" + dll_path + "\" " + loadDescription + " -> DLL not found. " + ErrorCause);
                 } catch (System.BadImageFormatException ex) {
-                    debugDll(ex.ToString());
+                    debugDll(ex.Message + "\n");
+                    ErrorCause = ex.Message;
+                    loadlogs.Add("Tried to load \"" + dll_path + "\" " + loadDescription + " -> Bad architecture. " + ErrorCause);
                 }
 
                 switch (_dllVersion) {
@@ -393,8 +414,9 @@ internal static class SafeNativeMethods
                                 preloadType = YAPIDLL_PRELOAD_TYPE.ABS_CURRENT_DIR;
                                 break;
                             case YAPIDLL_PRELOAD_TYPE.ABS_CURRENT_DIR:
-                                throw new System.DllNotFoundException("Unable to load YAPI dynamic library");
-
+                                for (int i = 0; i < loadlogs.Count; i++) YAPI.innerLog(loadlogs[i]);
+                                YAPI.innerLog("Failed to load YAPI dynamic library.");
+                                throw new System.DllNotFoundException(ErrorCause);
                         }
 
                         no_alternate_platform = true;
@@ -424,7 +446,7 @@ internal static class SafeNativeMethods
     private static void debugDll(string line)
     {
         if (YAPI._debugDllLoad) {
-            Console.WriteLine(line);
+            Console.Write(line);
         }
     }
 
@@ -3258,6 +3280,186 @@ internal static class SafeNativeMethods
                   return _yapiAddUdevRulesForYoctoLINAARCH64(force, errmsg);
         }
     }
+    [DllImport("yapi", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefWIN32(int hubref);
+    [DllImport("amd64\\yapi.dll", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefWIN64(int hubref);
+    [DllImport("libyapi32", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefMACOS32(int hubref);
+    [DllImport("libyapi64", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefMACOS64(int hubref);
+    [DllImport("libyapi-amd64", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefLIN64(int hubref);
+    [DllImport("libyapi-i386", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefLIN32(int hubref);
+    [DllImport("libyapi-armhf", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefLINARMHF(int hubref);
+    [DllImport("libyapi-aarch64", EntryPoint = "yapiGetNextHubRef", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetNextHubRefLINAARCH64(int hubref);
+    internal static int _yapiGetNextHubRef(int hubref)
+    {
+        if  (_dllVersion == YAPIDLL_VERSION.NOT_INIT) {
+            string version = "";
+            string date = "";
+            YAPI.apiGetAPIVersion(ref version, ref date);
+        }
+        switch (_dllVersion) {
+            case YAPIDLL_VERSION.NOT_INIT:
+                throw new YAPI_Exception(YAPI.NOT_INITIALIZED, "API not initialized");
+            default:
+            case YAPIDLL_VERSION.WIN32:
+                  return _yapiGetNextHubRefWIN32(hubref);
+            case YAPIDLL_VERSION.WIN64:
+                  return _yapiGetNextHubRefWIN64(hubref);
+            case YAPIDLL_VERSION.MACOS32:
+                  return _yapiGetNextHubRefMACOS32(hubref);
+            case YAPIDLL_VERSION.MACOS64:
+                  return _yapiGetNextHubRefMACOS64(hubref);
+            case YAPIDLL_VERSION.LIN64:
+                  return _yapiGetNextHubRefLIN64(hubref);
+            case YAPIDLL_VERSION.LIN32:
+                  return _yapiGetNextHubRefLIN32(hubref);
+            case YAPIDLL_VERSION.LINARMHF:
+                  return _yapiGetNextHubRefLINARMHF(hubref);
+            case YAPIDLL_VERSION.LINAARCH64:
+                  return _yapiGetNextHubRefLINAARCH64(hubref);
+        }
+    }
+    [DllImport("yapi", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrWIN32(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    [DllImport("amd64\\yapi.dll", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrWIN64(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    [DllImport("libyapi32", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrMACOS32(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    [DllImport("libyapi64", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrMACOS64(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    [DllImport("libyapi-amd64", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrLIN64(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    [DllImport("libyapi-i386", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrLIN32(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    [DllImport("libyapi-armhf", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrLINARMHF(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    [DllImport("libyapi-aarch64", EntryPoint = "yapiGetHubStrAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubStrAttrLINAARCH64(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize);
+    internal static int _yapiGetHubStrAttr(int hubref, StringBuilder attrname, StringBuilder attrval, int maxsize, ref int neededsize)
+    {
+        if  (_dllVersion == YAPIDLL_VERSION.NOT_INIT) {
+            string version = "";
+            string date = "";
+            YAPI.apiGetAPIVersion(ref version, ref date);
+        }
+        switch (_dllVersion) {
+            case YAPIDLL_VERSION.NOT_INIT:
+                throw new YAPI_Exception(YAPI.NOT_INITIALIZED, "API not initialized");
+            default:
+            case YAPIDLL_VERSION.WIN32:
+                  return _yapiGetHubStrAttrWIN32(hubref, attrname, attrval, maxsize, ref neededsize);
+            case YAPIDLL_VERSION.WIN64:
+                  return _yapiGetHubStrAttrWIN64(hubref, attrname, attrval, maxsize, ref neededsize);
+            case YAPIDLL_VERSION.MACOS32:
+                  return _yapiGetHubStrAttrMACOS32(hubref, attrname, attrval, maxsize, ref neededsize);
+            case YAPIDLL_VERSION.MACOS64:
+                  return _yapiGetHubStrAttrMACOS64(hubref, attrname, attrval, maxsize, ref neededsize);
+            case YAPIDLL_VERSION.LIN64:
+                  return _yapiGetHubStrAttrLIN64(hubref, attrname, attrval, maxsize, ref neededsize);
+            case YAPIDLL_VERSION.LIN32:
+                  return _yapiGetHubStrAttrLIN32(hubref, attrname, attrval, maxsize, ref neededsize);
+            case YAPIDLL_VERSION.LINARMHF:
+                  return _yapiGetHubStrAttrLINARMHF(hubref, attrname, attrval, maxsize, ref neededsize);
+            case YAPIDLL_VERSION.LINAARCH64:
+                  return _yapiGetHubStrAttrLINAARCH64(hubref, attrname, attrval, maxsize, ref neededsize);
+        }
+    }
+    [DllImport("yapi", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrWIN32(int hubref, StringBuilder attrname);
+    [DllImport("amd64\\yapi.dll", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrWIN64(int hubref, StringBuilder attrname);
+    [DllImport("libyapi32", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrMACOS32(int hubref, StringBuilder attrname);
+    [DllImport("libyapi64", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrMACOS64(int hubref, StringBuilder attrname);
+    [DllImport("libyapi-amd64", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrLIN64(int hubref, StringBuilder attrname);
+    [DllImport("libyapi-i386", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrLIN32(int hubref, StringBuilder attrname);
+    [DllImport("libyapi-armhf", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrLINARMHF(int hubref, StringBuilder attrname);
+    [DllImport("libyapi-aarch64", EntryPoint = "yapiGetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiGetHubIntAttrLINAARCH64(int hubref, StringBuilder attrname);
+    internal static int _yapiGetHubIntAttr(int hubref, StringBuilder attrname)
+    {
+        if  (_dllVersion == YAPIDLL_VERSION.NOT_INIT) {
+            string version = "";
+            string date = "";
+            YAPI.apiGetAPIVersion(ref version, ref date);
+        }
+        switch (_dllVersion) {
+            case YAPIDLL_VERSION.NOT_INIT:
+                throw new YAPI_Exception(YAPI.NOT_INITIALIZED, "API not initialized");
+            default:
+            case YAPIDLL_VERSION.WIN32:
+                  return _yapiGetHubIntAttrWIN32(hubref, attrname);
+            case YAPIDLL_VERSION.WIN64:
+                  return _yapiGetHubIntAttrWIN64(hubref, attrname);
+            case YAPIDLL_VERSION.MACOS32:
+                  return _yapiGetHubIntAttrMACOS32(hubref, attrname);
+            case YAPIDLL_VERSION.MACOS64:
+                  return _yapiGetHubIntAttrMACOS64(hubref, attrname);
+            case YAPIDLL_VERSION.LIN64:
+                  return _yapiGetHubIntAttrLIN64(hubref, attrname);
+            case YAPIDLL_VERSION.LIN32:
+                  return _yapiGetHubIntAttrLIN32(hubref, attrname);
+            case YAPIDLL_VERSION.LINARMHF:
+                  return _yapiGetHubIntAttrLINARMHF(hubref, attrname);
+            case YAPIDLL_VERSION.LINAARCH64:
+                  return _yapiGetHubIntAttrLINAARCH64(hubref, attrname);
+        }
+    }
+    [DllImport("yapi", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrWIN32(int hubref, StringBuilder attrname, int value);
+    [DllImport("amd64\\yapi.dll", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrWIN64(int hubref, StringBuilder attrname, int value);
+    [DllImport("libyapi32", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrMACOS32(int hubref, StringBuilder attrname, int value);
+    [DllImport("libyapi64", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrMACOS64(int hubref, StringBuilder attrname, int value);
+    [DllImport("libyapi-amd64", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrLIN64(int hubref, StringBuilder attrname, int value);
+    [DllImport("libyapi-i386", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrLIN32(int hubref, StringBuilder attrname, int value);
+    [DllImport("libyapi-armhf", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrLINARMHF(int hubref, StringBuilder attrname, int value);
+    [DllImport("libyapi-aarch64", EntryPoint = "yapiSetHubIntAttr", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private extern static int _yapiSetHubIntAttrLINAARCH64(int hubref, StringBuilder attrname, int value);
+    internal static int _yapiSetHubIntAttr(int hubref, StringBuilder attrname, int value)
+    {
+        if  (_dllVersion == YAPIDLL_VERSION.NOT_INIT) {
+            string version = "";
+            string date = "";
+            YAPI.apiGetAPIVersion(ref version, ref date);
+        }
+        switch (_dllVersion) {
+            case YAPIDLL_VERSION.NOT_INIT:
+                throw new YAPI_Exception(YAPI.NOT_INITIALIZED, "API not initialized");
+            default:
+            case YAPIDLL_VERSION.WIN32:
+                  return _yapiSetHubIntAttrWIN32(hubref, attrname, value);
+            case YAPIDLL_VERSION.WIN64:
+                  return _yapiSetHubIntAttrWIN64(hubref, attrname, value);
+            case YAPIDLL_VERSION.MACOS32:
+                  return _yapiSetHubIntAttrMACOS32(hubref, attrname, value);
+            case YAPIDLL_VERSION.MACOS64:
+                  return _yapiSetHubIntAttrMACOS64(hubref, attrname, value);
+            case YAPIDLL_VERSION.LIN64:
+                  return _yapiSetHubIntAttrLIN64(hubref, attrname, value);
+            case YAPIDLL_VERSION.LIN32:
+                  return _yapiSetHubIntAttrLIN32(hubref, attrname, value);
+            case YAPIDLL_VERSION.LINARMHF:
+                  return _yapiSetHubIntAttrLINARMHF(hubref, attrname, value);
+            case YAPIDLL_VERSION.LINAARCH64:
+                  return _yapiSetHubIntAttrLINAARCH64(hubref, attrname, value);
+        }
+    }
 //--- (end of generated code: YFunction dlldef)
 }
 
@@ -3294,7 +3496,7 @@ public class YAPI
     public const string YOCTO_API_VERSION_STR = "1.10";
     public const int YOCTO_API_VERSION_BCD = 0x0110;
 
-    public const string YOCTO_API_BUILD_NO = "50144";
+    public const string YOCTO_API_BUILD_NO = "57482";
     public const int YOCTO_DEFAULT_PORT = 4444;
     public const int YOCTO_VENDORID = 0x24e0;
     public const int YOCTO_DEVID_FACTORYBOOT = 1;
@@ -3324,8 +3526,8 @@ public class YAPI
     public const int YOCTO_CALIB_TYPE_OFS = 30;
     public const int yUnknowSize = 1024;
 
-    // --- (generated code: YFunction return codes)
-// Yoctopuce error codes, used by default as function return value
+// --- (generated code: YFunction return codes)
+    // Yoctopuce error codes, used by default as function return value
     public const int SUCCESS = 0;                   // everything worked all right
     public const int NOT_INITIALIZED = -1;          // call yInitAPI() first !
     public const int INVALID_ARGUMENT = -2;         // one of the arguments passed to the function is invalid
@@ -3342,7 +3544,11 @@ public class YAPI
     public const int RTC_NOT_READY = -13;           // real-time clock has not been initialized (or time was lost)
     public const int FILE_NOT_FOUND = -14;          // the file is not found
     public const int SSL_ERROR = -15;               // Error reported by mbedSSL
-    //--- (end of generated code: YFunction return codes)
+    public const int RFID_SOFT_ERROR = -16;         // Recoverable error with RFID tag (eg. tag out of reach), check YRfidStatus for details
+    public const int RFID_HARD_ERROR = -17;         // Serious RFID error (eg. write-protected, out-of-boundary), check YRfidStatus for details
+    public const int BUFFER_TOO_SMALL = -18;        // The buffer provided is too small
+
+//--- (end of generated code: YFunction return codes)
 
     /*
      * All static global and persitent variables (NOT reset in YAPI.FreeAPI()
@@ -3353,7 +3559,6 @@ public class YAPI
     static bool _apiInitialized = false;
     internal static YAPIContext _yapiContext = new YAPIContext();
     internal static bool _debugDllLoad = false;
-
 
     /*
      * All static variables (reset in YAPI.FreeAPI()
@@ -4597,8 +4802,7 @@ public class YAPI
      * <para>
      *   Be aware than when exceptions are enabled, every function that fails
      *   triggers an exception. If the exception is not caught by the user code,
-     *   it  either fires the debugger or aborts (i.e. crash) the program.
-     *   On failure, throws an exception or returns a negative error code.
+     *   it either fires the debugger or aborts (i.e. crash) the program.
      * </para>
      * </summary>
      */
@@ -4606,6 +4810,8 @@ public class YAPI
     {
         ExceptionsDisabled = false;
     }
+
+    public static void innerLog(string msg) { if (ylog != null) ylog(msg); }
 
     // - Internal callback registered into YAPI using a protected delegate
     private static void native_yLogFunction(IntPtr log, u32 loglen)
@@ -4716,8 +4922,14 @@ public class YAPI
                 YMeasure mesure = _sensor._decodeTimedReport(_timestamp, _duration, _report);
                 _sensor._invokeTimedReportCallback(mesure);
             } else if (_fun != null) {
-                // new value
-                _fun._invokeValueCallback(_value);
+                if (_value == null) {
+                    // force refresh of the function
+                    _fun.isOnline();
+                }else {
+                    // new value
+                    _fun._invokeValueCallback(_value);
+                }
+
             } else {
                 if (_beacon < 0) {
                     _module._invokeConfigChangeCallback();
@@ -4825,11 +5037,15 @@ public class YAPI
         SafeNativeMethods.yDeviceSt infos = SafeNativeMethods.emptyDeviceSt();
         PlugEvent ev;
         string errmsg = "";
-
+        for (int i = 0; i < YFunction._ValueCallbackList.Count; i++) {
+            if (YFunction._ValueCallbackList[i].get_functionDescriptor() == YFunction.FUNCTIONDESCRIPTOR_INVALID) {
+                DataEvent d_ev = new DataEvent(YFunction._ValueCallbackList[i], null);
+                _DataEvents.Add(d_ev);
+            }
+        }
         if (yapiGetDeviceInfo(d, ref infos, ref errmsg) != SUCCESS) {
             return;
         }
-
         YDevice.PlugDevice(d);
         YModule modul = YModule.FindModule(infos.serial + ".module");
         modul.setImmutableAttributes(infos);
@@ -5545,7 +5761,7 @@ public class YAPI
      *   <c>YAPI.SUCCESS</c> when the call succeeds.
      * </returns>
      * <para>
-     *   On failure, throws an exception or returns a negative error code.
+     *   On failure returns a negative error code.
      * </para>
      */
     public static int InitAPI(int mode, ref string errmsg)
@@ -5685,9 +5901,16 @@ public class YAPI
      * <para>
      *   <b><i>x.x.x.x</i></b> or <b><i>hostname</i></b>: The API will use the devices connected to the
      *   host with the given IP address or hostname. That host can be a regular computer
-     *   running a VirtualHub, or a networked YoctoHub such as YoctoHub-Ethernet or
+     *   running a <i>native VirtualHub</i>, a <i>VirtualHub for web</i> hosted on a server,
+     *   or a networked YoctoHub such as YoctoHub-Ethernet or
      *   YoctoHub-Wireless. If you want to use the VirtualHub running on you local
-     *   computer, use the IP address 127.0.0.1.
+     *   computer, use the IP address 127.0.0.1. If the given IP is unresponsive, <c>yRegisterHub</c>
+     *   will not return until a time-out defined by <c>ySetNetworkTimeout</c> has elapsed.
+     *   However, it is possible to preventively test a connection  with <c>yTestHub</c>.
+     *   If you cannot afford a network time-out, you can use the non blocking <c>yPregisterHub</c>
+     *   function that will establish the connection as soon as it is available.
+     * </para>
+     * <para>
      * </para>
      * <para>
      *   <b>callback</b>: that keyword make the API run in "<i>HTTP Callback</i>" mode.
@@ -5731,7 +5954,7 @@ public class YAPI
      *   <c>YAPI.SUCCESS</c> when the call succeeds.
      * </returns>
      * <para>
-     *   On failure, throws an exception or returns a negative error code.
+     *   On failure returns a negative error code.
      * </para>
      */
     public static int RegisterHub(string url, ref string errmsg)
@@ -5761,7 +5984,8 @@ public class YAPI
      *   This function has the same
      *   purpose and same arguments as <c>yRegisterHub()</c>, but does not trigger
      *   an error when the selected hub is not available at the time of the function call.
-     *   This makes it possible to register a network hub independently of the current
+     *   If the connexion cannot be established immediately, a background task will automatically
+     *   perform periodic retries. This makes it possible to register a network hub independently of the current
      *   connectivity, and to try to contact it only when a device is actively needed.
      * </para>
      * <para>
@@ -5778,7 +6002,7 @@ public class YAPI
      *   <c>YAPI.SUCCESS</c> when the call succeeds.
      * </returns>
      * <para>
-     *   On failure, throws an exception or returns a negative error code.
+     *   On failure returns a negative error code.
      * </para>
      */
     public static int PreregisterHub(string url, ref string errmsg)
@@ -5888,7 +6112,7 @@ public class YAPI
      *   <c>YAPI.SUCCESS</c> when the call succeeds.
      * </returns>
      * <para>
-     *   On failure, throws an exception or returns a negative error code.
+     *   On failure returns a negative error code.
      * </para>
      */
     public static YRETCODE UpdateDeviceList(ref string errmsg)
@@ -5946,7 +6170,7 @@ public class YAPI
      *   <c>YAPI.SUCCESS</c> when the call succeeds.
      * </returns>
      * <para>
-     *   On failure, throws an exception or returns a negative error code.
+     *   On failure returns a negative error code.
      * </para>
      */
     public static YRETCODE HandleEvents(ref string errmsg)
@@ -6009,7 +6233,7 @@ public class YAPI
      *   <c>YAPI.SUCCESS</c> when the call succeeds.
      * </returns>
      * <para>
-     *   On failure, throws an exception or returns a negative error code.
+     *   On failure returns a negative error code.
      * </para>
      */
     public static int Sleep(int ms_duration, ref string errmsg)
@@ -6060,7 +6284,7 @@ public class YAPI
      * </param>
      * <returns>
      *   <c>YAPI.SUCCESS</c> when the call succeeds.
-     *   On failure, throws an exception or returns a negative error code.
+     *   On failure returns a negative error code.
      * </returns>
      */
     public static int TriggerHubDiscovery(ref string errmsg)
@@ -6297,6 +6521,10 @@ public class YAPI
      */
     public static void SetDeviceListValidity(int deviceListValidity)
     {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
         _yapiContext.SetDeviceListValidity(deviceListValidity);
     }
 
@@ -6313,6 +6541,10 @@ public class YAPI
      */
     public static int GetDeviceListValidity()
     {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
         return _yapiContext.GetDeviceListValidity();
     }
 
@@ -6337,6 +6569,10 @@ public class YAPI
      */
     public static string AddUdevRule(bool force)
     {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
         return _yapiContext.AddUdevRule(force);
     }
 
@@ -6359,6 +6595,10 @@ public class YAPI
      */
     public static void SetNetworkTimeout(int networkMsTimeout)
     {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
         _yapiContext.SetNetworkTimeout(networkMsTimeout);
     }
 
@@ -6378,6 +6618,10 @@ public class YAPI
      */
     public static int GetNetworkTimeout()
     {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
         return _yapiContext.GetNetworkTimeout();
     }
 
@@ -6401,6 +6645,10 @@ public class YAPI
      */
     public static void SetCacheValidity(ulong cacheValidityMs)
     {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
         _yapiContext.SetCacheValidity(cacheValidityMs);
     }
 
@@ -6420,14 +6668,36 @@ public class YAPI
      */
     public static ulong GetCacheValidity()
     {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
         return _yapiContext.GetCacheValidity();
+    }
+
+    public static YHub nextHubInUseInternal(int hubref)
+    {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
+        return _yapiContext.nextHubInUseInternal(hubref);
+    }
+
+    public static YHub getYHubObj(int hubref)
+    {
+        if (!_apiInitialized) {
+            string errmsg = "";
+            InitAPI(0, ref errmsg);
+        }
+        return _yapiContext.getYHubObj(hubref);
     }
 //--- (end of generated code: YAPIContext yapiwrapper)
 }
 
 
 //--- (generated code: YAPIContext return codes)
-    //--- (end of generated code: YAPIContext return codes)
+//--- (end of generated code: YAPIContext return codes)
 //--- (generated code: YAPIContext dlldef)
 //--- (end of generated code: YAPIContext dlldef)
 //--- (generated code: YAPIContext class start)
@@ -6439,7 +6709,7 @@ public class YAPIContext
 
     protected ulong _defaultCacheValidity = 5;
     //--- (end of generated code: YAPIContext definitions)
-
+    protected Dictionary<int, YHub> _yhub_cache = new Dictionary<int, YHub>();
     public YAPIContext()
     {
         //--- (generated code: YAPIContext attributes initialization)
@@ -6622,11 +6892,55 @@ public class YAPIContext
         return this._defaultCacheValidity;
     }
 
+
+    public virtual YHub nextHubInUseInternal(int hubref)
+    {
+        int nextref;
+        nextref = SafeNativeMethods._yapiGetNextHubRef(hubref);
+        if (nextref < 0) {
+            return null;
+        }
+        return this.getYHubObj(nextref);
+    }
+
+
+    public virtual YHub getYHubObj(int hubref)
+    {
+        YHub obj;
+        lock (YAPI.globalLock) {
+            obj = this._findYHubFromCache(hubref);
+            if (obj == null) {
+                obj = new YHub(this, hubref);
+                this._addYHubToCache(hubref, obj);
+            }
+        }
+        return obj;
+    }
+
     //--- (end of generated code: YAPIContext implementation)
 
+
+    // function cache methods
+    protected YHub _findYHubFromCache(int hubref)
+    {
+        if (_yhub_cache.ContainsKey(hubref))
+            return _yhub_cache[hubref];
+        return null;
+    }
+
+
+    protected void _addYHubToCache(int hubref, YHub obj)
+    {
+        _yhub_cache[hubref] = obj;
+    }
+
+    internal void _ClearCache()
+    {
+        _yhub_cache.Clear();
+    }
+
+
     //--- (generated code: YAPIContext functions)
-
-
 
     //--- (end of generated code: YAPIContext functions)
 }
@@ -7003,6 +7317,7 @@ public class YDataStream
     protected List<double> _calraw = new List<double>();
     protected List<double> _calref = new List<double>();
     protected List<List<double>> _values = new List<List<double>>();
+    protected bool _isLoaded;
     //--- (end of generated code: YDataStream definitions)
 
     protected YAPI.yCalibrationHandler _calhdl;
@@ -7057,7 +7372,7 @@ public class YDataStream
             this._startTime = this._utcStamp + (ms_offset / 1000.0);
         } else {
             // legacy encoding subtract the measure interval form the UTC timestamp
-            this._startTime = this._utcStamp -  this._dataSamplesInterval;
+            this._startTime = this._utcStamp - this._dataSamplesInterval;
         }
         this._firstMeasureDuration = encoded[5];
         if (!(this._isAvg)) {
@@ -7131,6 +7446,9 @@ public class YDataStream
         int idx;
         List<int> udat = new List<int>();
         List<double> dat = new List<double>();
+        if (this._isLoaded && !(this._isClosed)) {
+            return YAPI.SUCCESS;
+        }
         if ((sdata).Length == 0) {
             this._nRows = 0;
             return YAPI.SUCCESS;
@@ -7168,7 +7486,14 @@ public class YDataStream
         }
 
         this._nRows = this._values.Count;
+        this._isLoaded = true;
         return YAPI.SUCCESS;
+    }
+
+
+    public virtual bool _wasLoaded()
+    {
+        return this._isLoaded;
     }
 
 
@@ -7177,6 +7502,23 @@ public class YDataStream
         string url;
         url = "logger.json?id="+
         this._functionId+"&run="+Convert.ToString(this._runNo)+"&utc="+Convert.ToString(this._utcStamp);
+        return url;
+    }
+
+
+    public virtual string _get_baseurl()
+    {
+        string url;
+        url = "logger.json?id="+
+        this._functionId+"&run="+Convert.ToString(this._runNo)+"&utc=";
+        return url;
+    }
+
+
+    public virtual string _get_urlsuffix()
+    {
+        string url;
+        url = ""+Convert.ToString(this._utcStamp);
         return url;
     }
 
@@ -7799,6 +8141,7 @@ public class YDataSet
     protected string _hardwareId;
     protected string _functionId;
     protected string _unit;
+    protected int _bulkLoad = 0;
     protected double _startTimeMs = 0;
     protected double _endTimeMs = 0;
     protected int _progress = 0;
@@ -7859,6 +8202,9 @@ public class YDataSet
 
         this._functionId = p.getString("id");
         this._unit = p.getString("unit");
+        if (p.has("bulk")) {
+            this._bulkLoad = Convert.ToInt32(p.getString("bulk"));
+        }
         if (p.has("calib")) {
             this._calib = YAPI._decodeFloats(p.getString("calib"));
             this._calib[0] = this._calib[0] / 1000;
@@ -7954,31 +8300,33 @@ public class YDataSet
         summaryStopMs = YAPI.MIN_DOUBLE;
 
         // Parse complete streams
-        for (int ii = 0; ii <  this._streams.Count; ii++) {
-            streamStartTimeMs = Math.Round( this._streams[ii].get_realStartTimeUTC() *1000);
-            streamDuration =  this._streams[ii].get_realDuration() ;
+        for (int ii_0 = 0; ii_0 <   this._streams.Count; ii_0++) {
+            streamStartTimeMs = Math.Round( this._streams[ii_0].get_realStartTimeUTC() * 1000);
+            streamDuration =  this._streams[ii_0].get_realDuration();
             streamEndTimeMs = streamStartTimeMs + Math.Round(streamDuration * 1000);
             if ((streamStartTimeMs >= this._startTimeMs) && ((this._endTimeMs == 0) || (streamEndTimeMs <= this._endTimeMs))) {
                 // stream that are completely inside the dataset
-                previewMinVal =  this._streams[ii].get_minValue();
-                previewAvgVal =  this._streams[ii].get_averageValue();
-                previewMaxVal =  this._streams[ii].get_maxValue();
+                previewMinVal =  this._streams[ii_0].get_minValue();
+                previewAvgVal =  this._streams[ii_0].get_averageValue();
+                previewMaxVal =  this._streams[ii_0].get_maxValue();
                 previewStartMs = streamStartTimeMs;
                 previewStopMs = streamEndTimeMs;
                 previewDuration = streamDuration;
             } else {
                 // stream that are partially in the dataset
                 // we need to parse data to filter value outside the dataset
-                url =  this._streams[ii]._get_url();
-                data = this._parent._download(url);
-                this._streams[ii]._parseStream(data);
-                dataRows =  this._streams[ii].get_dataRows();
+                if (!( this._streams[ii_0]._wasLoaded())) {
+                    url =  this._streams[ii_0]._get_url();
+                    data = this._parent._download(url);
+                    this._streams[ii_0]._parseStream(data);
+                }
+                dataRows =  this._streams[ii_0].get_dataRows();
                 if (dataRows.Count == 0) {
                     return this.get_progress();
                 }
                 tim = streamStartTimeMs;
-                fitv = Math.Round( this._streams[ii].get_firstDataSamplesInterval() * 1000);
-                itv = Math.Round( this._streams[ii].get_dataSamplesInterval() * 1000);
+                fitv = Math.Round( this._streams[ii_0].get_firstDataSamplesInterval() * 1000);
+                itv = Math.Round( this._streams[ii_0].get_dataSamplesInterval() * 1000);
                 nCols = dataRows[0].Count;
                 minCol = 0;
                 if (nCols > 2) {
@@ -7999,7 +8347,7 @@ public class YDataSet
                 previewMaxVal = YAPI.MIN_DOUBLE;
                 m_pos = 0;
                 while (m_pos < dataRows.Count) {
-                    measure_data  = dataRows[m_pos];
+                    measure_data = dataRows[m_pos];
                     if (m_pos == 0) {
                         mitv = fitv;
                     } else {
@@ -8022,8 +8370,10 @@ public class YDataSet
                         if (previewMaxVal < maxVal) {
                             previewMaxVal = maxVal;
                         }
-                        previewTotalAvg = previewTotalAvg + (avgVal * mitv);
-                        previewTotalTime = previewTotalTime + mitv;
+                        if (!(Double.IsNaN(avgVal))) {
+                            previewTotalAvg = previewTotalAvg + (avgVal * mitv);
+                            previewTotalTime = previewTotalTime + mitv;
+                        }
                     }
                     tim = end_;
                     m_pos = m_pos + 1;
@@ -8081,6 +8431,15 @@ public class YDataSet
         int avgCol;
         int maxCol;
         bool firstMeasure;
+        string baseurl;
+        string url;
+        string suffix;
+        List<string> suffixes = new List<string>();
+        int idx;
+        byte[] bulkFile = new byte[0];
+        List<string> streamStr = new List<string>();
+        int urlIdx;
+        byte[] streamBin = new byte[0];
 
         if (progress != this._progress) {
             return this._progress;
@@ -8089,7 +8448,9 @@ public class YDataSet
             return this.loadSummary(data);
         }
         stream = this._streams[this._progress];
-        stream._parseStream(data);
+        if (!(stream._wasLoaded())) {
+            stream._parseStream(data);
+        }
         dataRows = stream.get_dataRows();
         this._progress = this._progress + 1;
         if (dataRows.Count == 0) {
@@ -8118,18 +8479,52 @@ public class YDataSet
         }
 
         firstMeasure = true;
-        for (int ii = 0; ii < dataRows.Count; ii++) {
+        for (int ii_0 = 0; ii_0 <  dataRows.Count; ii_0++) {
             if (firstMeasure) {
                 end_ = tim + fitv;
                 firstMeasure = false;
             } else {
                 end_ = tim + itv;
             }
-            avgv = dataRows[ii][avgCol];
+            avgv = dataRows[ii_0][avgCol];
             if ((end_ > this._startTimeMs) && ((this._endTimeMs == 0) || (tim < this._endTimeMs)) && !(Double.IsNaN(avgv))) {
-                this._measures.Add(new YMeasure(tim / 1000, end_ / 1000, dataRows[ii][minCol], avgv, dataRows[ii][maxCol]));
+                this._measures.Add(new YMeasure(tim / 1000, end_ / 1000, dataRows[ii_0][minCol], avgv, dataRows[ii_0][maxCol]));
             }
             tim = end_;
+        }
+        // Perform bulk preload to speed-up network transfer
+        if ((this._bulkLoad > 0) && (this._progress < this._streams.Count)) {
+            stream = this._streams[this._progress];
+            if (stream._wasLoaded()) {
+                return this.get_progress();
+            }
+            baseurl = stream._get_baseurl();
+            url = stream._get_url();
+            suffix = stream._get_urlsuffix();
+            suffixes.Add(suffix);
+            idx = this._progress + 1;
+            while ((idx < this._streams.Count) && (suffixes.Count < this._bulkLoad)) {
+                stream = this._streams[idx];
+                if (!(stream._wasLoaded()) && (stream._get_baseurl() == baseurl)) {
+                    suffix = stream._get_urlsuffix();
+                    suffixes.Add(suffix);
+                    url = url + "," + suffix;
+                }
+                idx = idx + 1;
+            }
+            bulkFile = this._parent._download(url);
+            streamStr = this._parent._json_get_array(bulkFile);
+            urlIdx = 0;
+            idx = this._progress;
+            while ((idx < this._streams.Count) && (urlIdx < suffixes.Count) && (urlIdx < streamStr.Count)) {
+                stream = this._streams[idx];
+                if ((stream._get_baseurl() == baseurl) && (stream._get_urlsuffix() == suffixes[urlIdx])) {
+                    streamBin = YAPI.DefaultEncoding.GetBytes(streamStr[urlIdx]);
+                    stream._parseStream(streamBin);
+                    urlIdx = urlIdx + 1;
+                }
+                idx = idx + 1;
+            }
         }
         return this.get_progress();
     }
@@ -8314,7 +8709,7 @@ public class YDataSet
 
     /**
      * <summary>
-     *   Loads the the next block of measures from the dataLogger, and updates
+     *   Loads the next block of measures from the dataLogger, and updates
      *   the progress indicator.
      * <para>
      * </para>
@@ -8339,13 +8734,17 @@ public class YDataSet
                 url = ""+url+"&from="+Convert.ToString(this.imm_get_startTimeUTC());
             }
             if (this._endTimeMs != 0) {
-                url = ""+url+"&to="+Convert.ToString(this.imm_get_endTimeUTC()+1);
+                url = ""+url+"&to="+Convert.ToString(this.imm_get_endTimeUTC() + 1);
             }
         } else {
             if (this._progress >= this._streams.Count) {
                 return 100;
             } else {
                 stream = this._streams[this._progress];
+                if (stream._wasLoaded()) {
+                    // Do not reload stream if it was already loaded
+                    return this.processMore(this._progress, YAPI.DefaultEncoding.GetBytes(""));
+                }
                 url = stream._get_url();
             }
         }
@@ -8458,9 +8857,9 @@ public class YDataSet
 
         startUtcMs = measure.get_startTimeUTC() * 1000;
         stream = null;
-        for (int ii = 0; ii < this._streams.Count; ii++) {
-            if (Math.Round(this._streams[ii].get_realStartTimeUTC() *1000) == startUtcMs) {
-                stream = this._streams[ii];
+        for (int ii_0 = 0; ii_0 <  this._streams.Count; ii_0++) {
+            if (Math.Round(this._streams[ii_0].get_realStartTimeUTC() *1000) == startUtcMs) {
+                stream = this._streams[ii_0];
             }
         }
         if (stream == null) {
@@ -8488,10 +8887,10 @@ public class YDataSet
             maxCol = 0;
         }
 
-        for (int ii = 0; ii < dataRows.Count; ii++) {
+        for (int ii_1 = 0; ii_1 <  dataRows.Count; ii_1++) {
             end_ = tim + itv;
             if ((end_ > this._startTimeMs) && ((this._endTimeMs == 0) || (tim < this._endTimeMs))) {
-                measures.Add(new YMeasure(tim / 1000.0, end_ / 1000.0, dataRows[ii][minCol], dataRows[ii][avgCol], dataRows[ii][maxCol]));
+                measures.Add(new YMeasure(tim / 1000.0, end_ / 1000.0, dataRows[ii_1][minCol], dataRows[ii_1][avgCol], dataRows[ii_1][maxCol]));
             }
             tim = end_;
         }
@@ -8750,7 +9149,7 @@ public class YConsolidatedDataSet
                 newvalue = measures[idx].get_averageValue();
                 datarec.Add(newvalue);
                 this._nexttim[s] = 0.0;
-                this._nextidx[s] = idx+1;
+                this._nextidx[s] = idx + 1;
             } else {
                 datarec.Add(Double.NaN);
             }
@@ -8768,6 +9167,359 @@ public class YConsolidatedDataSet
     }
 
     //--- (end of generated code: YConsolidatedDataSet implementation)
+}
+
+//--- (generated code: YHub class start)
+public class YHub
+{
+//--- (end of generated code: YHub class start)
+    //--- (generated code: YHub definitions)
+
+    protected YAPIContext _ctx;
+    protected int _hubref = 0;
+    protected object _userData = null;
+    //--- (end of generated code: YHub definitions)
+
+    public YHub(YAPIContext yctx, int hubref)
+    {
+        //--- (generated code: YHub attributes initialization)
+        //--- (end of generated code: YHub attributes initialization)
+        _ctx = yctx;
+        _hubref = hubref;
+    }
+
+    //--- (generated code: YHub implementation)
+
+
+
+    public virtual string _getStrAttr(string attrName)
+    {
+        StringBuilder val = new StringBuilder(1024);
+        int res;
+        int fullsize;
+        fullsize = 0;
+        res = SafeNativeMethods._yapiGetHubStrAttr(this._hubref, new StringBuilder(attrName), val, 1024, ref fullsize);
+        if (res > 0) {
+            return val.ToString();
+        }
+        return "";
+    }
+
+
+    public virtual int _getIntAttr(string attrName)
+    {
+        return SafeNativeMethods._yapiGetHubIntAttr(this._hubref, new StringBuilder(attrName));
+    }
+
+
+    public virtual void _setIntAttr(string attrName, int value)
+    {
+        SafeNativeMethods._yapiSetHubIntAttr(this._hubref, new StringBuilder(attrName), value);
+    }
+
+
+    /**
+     * <summary>
+     *   Returns the URL that has been used first to register this hub.
+     * <para>
+     * </para>
+     * </summary>
+     */
+    public virtual string get_registeredUrl()
+    {
+        return this._getStrAttr("registeredUrl");
+    }
+
+
+    /**
+     * <summary>
+     *   Returns all known URLs that have been used to register this hub.
+     * <para>
+     *   URLs are pointing to the same hub when the devices connected
+     *   are sharing the same serial number.
+     * </para>
+     * </summary>
+     */
+    public virtual List<string> get_knownUrls()
+    {
+        StringBuilder smallbuff = new StringBuilder(1024);
+        StringBuilder bigbuff = null;
+        int buffsize;
+        int fullsize;
+        int yapi_res;
+        string urls_packed;
+        string known_url_val;
+        List<string> url_list = new List<string>();
+
+        fullsize = 0;
+        known_url_val = "knownUrls";
+        yapi_res = SafeNativeMethods._yapiGetHubStrAttr(this._hubref, new StringBuilder(known_url_val), smallbuff, 1024, ref fullsize);
+        if (yapi_res < 0) {
+            return url_list;
+        }
+        if (fullsize <= 1024) {
+            urls_packed = smallbuff.ToString();
+        } else {
+            buffsize = fullsize;
+            bigbuff = new StringBuilder(buffsize);
+            yapi_res = SafeNativeMethods._yapiGetHubStrAttr(this._hubref, new StringBuilder(known_url_val), bigbuff, buffsize, ref fullsize);
+            if (yapi_res < 0) {
+                bigbuff = null;
+                return url_list;
+            } else {
+                urls_packed = bigbuff.ToString();
+            }
+            bigbuff = null;
+        }
+        if (!(urls_packed == "")) {
+            url_list = new List<string>(urls_packed.Split(new Char[] {'?'}));
+        }
+        return url_list;
+    }
+
+
+    /**
+     * <summary>
+     *   Returns the URL currently in use to communicate with this hub.
+     * <para>
+     * </para>
+     * </summary>
+     */
+    public virtual string get_connectionUrl()
+    {
+        return this._getStrAttr("connectionUrl");
+    }
+
+
+    /**
+     * <summary>
+     *   Returns the hub serial number, if the hub was already connected once.
+     * <para>
+     * </para>
+     * </summary>
+     */
+    public virtual string get_serialNumber()
+    {
+        return this._getStrAttr("serialNumber");
+    }
+
+
+    /**
+     * <summary>
+     *   Tells if this hub is still registered within the API.
+     * <para>
+     * </para>
+     * </summary>
+     * <returns>
+     *   <c>true</c> if the hub has not been unregistered.
+     * </returns>
+     */
+    public virtual bool isInUse()
+    {
+        return this._getIntAttr("isInUse") > 0;
+    }
+
+
+    /**
+     * <summary>
+     *   Tells if there is an active communication channel with this hub.
+     * <para>
+     * </para>
+     * </summary>
+     * <returns>
+     *   <c>true</c> if the hub is currently connected.
+     * </returns>
+     */
+    public virtual bool isOnline()
+    {
+        return this._getIntAttr("isOnline") > 0;
+    }
+
+
+    /**
+     * <summary>
+     *   Tells if write access on this hub is blocked.
+     * <para>
+     *   Return <c>true</c> if it
+     *   is not possible to change attributes on this hub
+     * </para>
+     * </summary>
+     * <returns>
+     *   <c>true</c> if it is not possible to change attributes on this hub.
+     * </returns>
+     */
+    public virtual bool isReadOnly()
+    {
+        return this._getIntAttr("isReadOnly") > 0;
+    }
+
+
+    /**
+     * <summary>
+     *   Modifies tthe network connection delay for this hub.
+     * <para>
+     *   The default value is inherited from <c>ySetNetworkTimeout</c>
+     *   at the time when the hub is registered, but it can be updated
+     *   afterwards for each specific hub if necessary.
+     * </para>
+     * <para>
+     * </para>
+     * </summary>
+     * <param name="networkMsTimeout">
+     *   the network connection delay in milliseconds.
+     * @noreturn
+     * </param>
+     */
+    public virtual void set_networkTimeout(int networkMsTimeout)
+    {
+        this._setIntAttr("networkTimeout",networkMsTimeout);
+    }
+
+
+    /**
+     * <summary>
+     *   Returns the network connection delay for this hub.
+     * <para>
+     *   The default value is inherited from <c>ySetNetworkTimeout</c>
+     *   at the time when the hub is registered, but it can be updated
+     *   afterwards for each specific hub if necessary.
+     * </para>
+     * </summary>
+     * <returns>
+     *   the network connection delay in milliseconds.
+     * </returns>
+     */
+    public virtual int get_networkTimeout()
+    {
+        return this._getIntAttr("networkTimeout");
+    }
+
+
+    /**
+     * <summary>
+     *   Returns the numerical error code of the latest error with the hub.
+     * <para>
+     *   This method is mostly useful when using the Yoctopuce library with
+     *   exceptions disabled.
+     * </para>
+     * </summary>
+     * <returns>
+     *   a number corresponding to the code of the latest error that occurred while
+     *   using the hub object
+     * </returns>
+     */
+    public virtual int get_errorType()
+    {
+        return this._getIntAttr("errorType");
+    }
+
+
+    /**
+     * <summary>
+     *   Returns the error message of the latest error with the hub.
+     * <para>
+     *   This method is mostly useful when using the Yoctopuce library with
+     *   exceptions disabled.
+     * </para>
+     * </summary>
+     * <returns>
+     *   a string corresponding to the latest error message that occured while
+     *   using the hub object
+     * </returns>
+     */
+    public virtual string get_errorMessage()
+    {
+        return this._getStrAttr("errorMessage");
+    }
+
+
+    /**
+     * <summary>
+     *   Returns the value of the userData attribute, as previously stored
+     *   using method <c>set_userData</c>.
+     * <para>
+     *   This attribute is never touched directly by the API, and is at
+     *   disposal of the caller to store a context.
+     * </para>
+     * <para>
+     * </para>
+     * </summary>
+     * <returns>
+     *   the object stored previously by the caller.
+     * </returns>
+     */
+    public virtual object get_userData()
+    {
+        return this._userData;
+    }
+
+
+    /**
+     * <summary>
+     *   Stores a user context provided as argument in the userData
+     *   attribute of the function.
+     * <para>
+     *   This attribute is never touched by the API, and is at
+     *   disposal of the caller to store a context.
+     * </para>
+     * <para>
+     * </para>
+     * </summary>
+     * <param name="data">
+     *   any kind of object to be stored
+     * @noreturn
+     * </param>
+     */
+    public virtual void set_userData(object data)
+    {
+        this._userData = data;
+    }
+
+
+    /**
+     * <summary>
+     *   Starts the enumeration of hubs currently in use by the API.
+     * <para>
+     *   Use the method <c>YHub.nextHubInUse()</c> to iterate on the
+     *   next hubs.
+     * </para>
+     * </summary>
+     * <returns>
+     *   a pointer to a <c>YHub</c> object, corresponding to
+     *   the first hub currently in use by the API, or a
+     *   <c>null</c> pointer if none has been registered.
+     * </returns>
+     */
+    public static YHub FirstHubInUse()
+    {
+        return YAPI.nextHubInUseInternal(-1);
+    }
+
+
+    /**
+     * <summary>
+     *   Continues the module enumeration started using <c>YHub.FirstHubInUse()</c>.
+     * <para>
+     *   Caution: You can't make any assumption about the order of returned hubs.
+     * </para>
+     * </summary>
+     * <returns>
+     *   a pointer to a <c>YHub</c> object, corresponding to
+     *   the next hub currenlty in use, or a <c>null</c> pointer
+     *   if there are no more hubs to enumerate.
+     * </returns>
+     */
+    public virtual YHub nextHubInUse()
+    {
+        return this._ctx.nextHubInUseInternal(this._hubref);
+    }
+
+    //--- (end of generated code: YHub implementation)
+
+
+    //--- (generated code: YHub functions)
+
+    //--- (end of generated code: YHub functions)
 }
 
 
@@ -9608,16 +10360,16 @@ public class YFunction
 
     /**
      * <summary>
-     *   Test if the function is readOnly.
+     *   Indicates whether changes to the function are prohibited or allowed.
      * <para>
-     *   Return <c>true</c> if the function is write protected
-     *   or that the function is not available.
+     *   Returns <c>true</c> if the function is blocked by an admin password
+     *   or if the function is not available.
      * </para>
      * <para>
      * </para>
      * </summary>
      * <returns>
-     *   <c>true</c> if the function is readOnly or not online.
+     *   <c>true</c> if the function is write-protected or not online.
      * </returns>
      */
     public virtual bool isReadOnly()
@@ -9721,8 +10473,6 @@ public class YFunction
             return null;
         return FindFunction(serial + "." + funcId);
     }
-
-
 
     //--- (end of generated code: YFunction functions)
 
@@ -10070,7 +10820,7 @@ public class YFunction
         throw new YAPI_Exception(YAPI.INVALID_ARGUMENT, "No key " + key + "in JSON struct");
     }
 
-    protected List<string> _json_get_array(byte[] data)
+    public List<string> _json_get_array(byte[] data)
     {
         string debug = YAPI.DefaultEncoding.GetString(data);
         YAPI.YJSONArray array = new YAPI.YJSONArray(debug);
@@ -10306,6 +11056,9 @@ public class YFunction
         string funcValue = "";
 
         lock (_thisLock) {
+            if (_serial != null &&_serial != "") {
+                return YModule.FindModule(_serial + ".module");
+            }
             fundescr = YAPI.yapiGetFunction(_className, _func, ref errmsg);
             if (!YAPI.YISERR(fundescr)) {
                 if (!YAPI.YISERR(YAPI.yapiGetFunctionInfo(fundescr, ref devdescr, ref serial, ref funcId, ref funcName, ref funcValue, ref errmsg))) {
@@ -11133,7 +11886,7 @@ public class YModule : YFunction
         prodname = this.get_productName();
         prodrel = this.get_productRelease();
         if (prodrel > 1) {
-            fullname = ""+ prodname+" rev. "+((char)(64+prodrel)).ToString();
+            fullname = ""+ prodname+" rev. "+((char)(64 + prodrel)).ToString();
         } else {
             fullname = prodname;
         }
@@ -11507,18 +12260,18 @@ public class YModule : YFunction
         ext_settings = ", \"extras\":[";
         templist = this.get_functionIds("Temperature");
         sep = "";
-        for (int ii = 0; ii <  templist.Count; ii++) {
+        for (int ii_0 = 0; ii_0 <   templist.Count; ii_0++) {
             if (YAPI._atoi(this.get_firmwareRelease()) > 9000) {
-                url = "api/"+ templist[ii]+"/sensorType";
+                url = "api/"+ templist[ii_0]+"/sensorType";
                 t_type = YAPI.DefaultEncoding.GetString(this._download(url));
                 if (t_type == "RES_NTC" || t_type == "RES_LINEAR") {
-                    id = ( templist[ii]).Substring( 11, ( templist[ii]).Length - 11);
+                    id = ( templist[ii_0]).Substring( 11, ( templist[ii_0]).Length - 11);
                     if (id == "") {
                         id = "1";
                     }
                     temp_data_bin = this._download("extra.json?page="+id);
                     if ((temp_data_bin).Length > 0) {
-                        item = ""+ sep+"{\"fid\":\""+  templist[ii]+"\", \"json\":"+YAPI.DefaultEncoding.GetString(temp_data_bin)+"}\n";
+                        item = ""+ sep+"{\"fid\":\""+  templist[ii_0]+"\", \"json\":"+YAPI.DefaultEncoding.GetString(temp_data_bin)+"}\n";
                         ext_settings = ext_settings + item;
                         sep = ",";
                     }
@@ -11533,8 +12286,8 @@ public class YModule : YFunction
             }
             filelist = this._json_get_array(json);
             sep = "";
-            for (int ii = 0; ii <  filelist.Count; ii++) {
-                name = this._json_get_key(YAPI.DefaultEncoding.GetBytes( filelist[ii]), "name");
+            for (int ii_1 = 0; ii_1 <   filelist.Count; ii_1++) {
+                name = this._json_get_key(YAPI.DefaultEncoding.GetBytes( filelist[ii_1]), "name");
                 if (((name).Length > 0) && !(name == "startupConf.json")) {
                     file_data_bin = this._download(this._escapeAttr(name));
                     file_data = YAPI._bytesToHexStr(file_data_bin, 0, file_data_bin.Length);
@@ -11581,10 +12334,10 @@ public class YModule : YFunction
         string functionId;
         string data;
         extras = this._json_get_array(YAPI.DefaultEncoding.GetBytes(jsonExtra));
-        for (int ii = 0; ii <  extras.Count; ii++) {
-            functionId = this._get_json_path( extras[ii], "fid");
+        for (int ii_0 = 0; ii_0 <   extras.Count; ii_0++) {
+            functionId = this._get_json_path( extras[ii_0], "fid");
             functionId = this._decode_json_string(functionId);
-            data = this._get_json_path( extras[ii], "json");
+            data = this._get_json_path( extras[ii_0], "json");
             if (this.hasFunction(functionId)) {
                 this.loadThermistorExtra(functionId, data);
             }
@@ -11649,10 +12402,10 @@ public class YModule : YFunction
             }
             json_files = this._get_json_path(json, "files");
             files = this._json_get_array(YAPI.DefaultEncoding.GetBytes(json_files));
-            for (int ii = 0; ii <  files.Count; ii++) {
-                name = this._get_json_path( files[ii], "name");
+            for (int ii_0 = 0; ii_0 <   files.Count; ii_0++) {
+                name = this._get_json_path( files[ii_0], "name");
                 name = this._decode_json_string(name);
-                data = this._get_json_path( files[ii], "data");
+                data = this._get_json_path( files[ii_0], "data");
                 data = this._decode_json_string(data);
                 if (name == "") {
                     fuperror = fuperror + 1;
@@ -11911,8 +12664,8 @@ public class YModule : YFunction
             } else {
                 if (paramVer == 1) {
                     words_str = new List<string>(param.Split(new Char[] {','}));
-                    for (int ii = 0; ii < words_str.Count; ii++) {
-                        words.Add(YAPI._atoi(words_str[ii]));
+                    for (int ii_0 = 0; ii_0 <  words_str.Count; ii_0++) {
+                        words.Add(YAPI._atoi(words_str[ii_0]));
                     }
                     if (param == "" || (words[0] > 10)) {
                         paramScale = 0;
@@ -12100,8 +12853,8 @@ public class YModule : YFunction
         newval = "";
         old_json_flat = this._flattenJsonStruct(settings);
         old_dslist = this._json_get_array(old_json_flat);
-        for (int ii = 0; ii < old_dslist.Count; ii++) {
-            each_str = this._json_get_string(YAPI.DefaultEncoding.GetBytes(old_dslist[ii]));
+        for (int ii_0 = 0; ii_0 <  old_dslist.Count; ii_0++) {
+            each_str = this._json_get_string(YAPI.DefaultEncoding.GetBytes(old_dslist[ii_0]));
             // split json path and attr
             leng = (each_str).Length;
             eqpos = (each_str).IndexOf("=");
@@ -12126,9 +12879,9 @@ public class YModule : YFunction
         }
         actualSettings = this._flattenJsonStruct(actualSettings);
         new_dslist = this._json_get_array(actualSettings);
-        for (int ii = 0; ii < new_dslist.Count; ii++) {
+        for (int ii_1 = 0; ii_1 <  new_dslist.Count; ii_1++) {
             // remove quotes
-            each_str = this._json_get_string(YAPI.DefaultEncoding.GetBytes(new_dslist[ii]));
+            each_str = this._json_get_string(YAPI.DefaultEncoding.GetBytes(new_dslist[ii_1]));
             // split json path and attr
             leng = (each_str).Length;
             eqpos = (each_str).IndexOf("=");
@@ -12346,14 +13099,43 @@ public class YModule : YFunction
             }
             i = i + 1;
         }
-        for (int ii = 0; ii < restoreLast.Count; ii++) {
-            subres = this._tryExec(restoreLast[ii]);
+        for (int ii_2 = 0; ii_2 <  restoreLast.Count; ii_2++) {
+            subres = this._tryExec(restoreLast[ii_2]);
             if ((res == YAPI.SUCCESS) && (subres != YAPI.SUCCESS)) {
                 res = subres;
             }
         }
         this.clearCache();
         return res;
+    }
+
+
+    /**
+     * <summary>
+     *   Adds a file to the uploaded data at the next HTTP callback.
+     * <para>
+     *   This function only affects the next HTTP callback and only works in
+     *   HTTP callback mode.
+     * </para>
+     * <para>
+     * </para>
+     * </summary>
+     * <param name="filename">
+     *   the name of the file to upload at the next HTTP callback
+     * </param>
+     * <returns>
+     *   nothing.
+     * </returns>
+     */
+    public virtual int addFileToHTTPCallback(string filename)
+    {
+        byte[] content = new byte[0];
+
+        content = this._download("@YCB+" + filename);
+        if ((content).Length == 0) {
+            return YAPI.NOT_SUPPORTED;
+        }
+        return YAPI.SUCCESS;
     }
 
 
@@ -12788,13 +13570,15 @@ public class YModule : YFunction
      * <summary>
      *   Retrieves the type of the <i>n</i>th function on the module.
      * <para>
+     *   Yoctopuce functions type names match their class names without the <i>Y</i> prefix, for instance
+     *   <i>Relay</i>, <i>Temperature</i> etc..
      * </para>
      * </summary>
      * <param name="functionIndex">
      *   the index of the function for which the information is desired, starting at 0 for the first function.
      * </param>
      * <returns>
-     *   a string corresponding to the type of the function
+     *   a string corresponding to the type of the function.
      * </returns>
      * <para>
      *   On failure, throws an exception or returns an empty string.
@@ -12983,8 +13767,6 @@ public class YModule : YFunction
         return FindModule(serial + "." + funcId);
     }
 
-
-
     //--- (end of generated code: YModule functions)
 }
 
@@ -13073,19 +13855,19 @@ public class YSensor : YFunction
         }
         if (json_val.has("currentValue"))
         {
-            _currentValue = Math.Round(json_val.getDouble("currentValue") * 1000.0 / 65536.0) / 1000.0;
+            _currentValue = Math.Round(json_val.getDouble("currentValue") / 65.536) / 1000.0;
         }
         if (json_val.has("lowestValue"))
         {
-            _lowestValue = Math.Round(json_val.getDouble("lowestValue") * 1000.0 / 65536.0) / 1000.0;
+            _lowestValue = Math.Round(json_val.getDouble("lowestValue") / 65.536) / 1000.0;
         }
         if (json_val.has("highestValue"))
         {
-            _highestValue = Math.Round(json_val.getDouble("highestValue") * 1000.0 / 65536.0) / 1000.0;
+            _highestValue = Math.Round(json_val.getDouble("highestValue") / 65.536) / 1000.0;
         }
         if (json_val.has("currentRawValue"))
         {
-            _currentRawValue = Math.Round(json_val.getDouble("currentRawValue") * 1000.0 / 65536.0) / 1000.0;
+            _currentRawValue = Math.Round(json_val.getDouble("currentRawValue") / 65.536) / 1000.0;
         }
         if (json_val.has("logFrequency"))
         {
@@ -13105,7 +13887,7 @@ public class YSensor : YFunction
         }
         if (json_val.has("resolution"))
         {
-            _resolution = Math.Round(json_val.getDouble("resolution") * 1000.0 / 65536.0) / 1000.0;
+            _resolution = Math.Round(json_val.getDouble("resolution") / 65.536) / 1000.0;
         }
         if (json_val.has("sensorState"))
         {
@@ -13981,7 +14763,7 @@ public class YSensor : YFunction
         byte[] res = new byte[0];
 
         res = this._download("api/dataLogger/recording?recording=1");
-        if (!((res).Length>0)) {
+        if (!((res).Length > 0)) {
             this._throw(YAPI.IO_ERROR, "unable to start datalogger");
             return YAPI.IO_ERROR;
         }
@@ -14004,7 +14786,7 @@ public class YSensor : YFunction
         byte[] res = new byte[0];
 
         res = this._download("api/dataLogger/recording?recording=0");
-        if (!((res).Length>0)) {
+        if (!((res).Length > 0)) {
             this._throw(YAPI.IO_ERROR, "unable to stop datalogger");
             return YAPI.IO_ERROR;
         }
@@ -14191,11 +14973,11 @@ public class YSensor : YFunction
             }
             rawValues.Clear();
             refValues.Clear();
-            for (int ii = 0; ii < this._calraw.Count; ii++) {
-                rawValues.Add(this._calraw[ii]);
+            for (int ii_0 = 0; ii_0 <  this._calraw.Count; ii_0++) {
+                rawValues.Add(this._calraw[ii_0]);
             }
-            for (int ii = 0; ii < this._calref.Count; ii++) {
-                refValues.Add(this._calref[ii]);
+            for (int ii_1 = 0; ii_1 <  this._calref.Count; ii_1++) {
+                refValues.Add(this._calref[ii_1]);
             }
         }
         return YAPI.SUCCESS;
@@ -14454,8 +15236,6 @@ public class YSensor : YFunction
             return null;
         return FindSensor(serial + "." + funcId);
     }
-
-
 
     //--- (end of generated code: YSensor functions)
 }
@@ -15060,9 +15840,9 @@ public class YDataLogger : YFunction
 
         dslist = this._json_get_array(json);
         res.Clear();
-        for (int ii = 0; ii < dslist.Count; ii++) {
+        for (int ii_0 = 0; ii_0 <  dslist.Count; ii_0++) {
             dataset = new YDataSet(this);
-            dataset._parse(dslist[ii]);
+            dataset._parse(dslist[ii_0]);
             res.Add(dataset);
         }
         return res;
@@ -15206,8 +15986,6 @@ public class YDataLogger : YFunction
             return null;
         return FindDataLogger(serial + "." + funcId);
     }
-
-
 
     //--- (end of generated code: YDataLogger functions)
 }
